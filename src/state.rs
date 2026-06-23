@@ -243,6 +243,7 @@ fn get_migrations(
             "
             SELECT index, name
             FROM reshape.migrations
+            ORDER BY index ASC
             LIMIT 100
             ",
         )?
