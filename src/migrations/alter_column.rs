@@ -136,7 +136,7 @@ impl Action for AlterColumn {
                 DROP TRIGGER IF EXISTS "{down_trigger}" ON "{table}";
                 CREATE TRIGGER "{down_trigger}" BEFORE INSERT OR UPDATE ON "{table}" FOR EACH ROW EXECUTE PROCEDURE {down_trigger}();
                 "#,
-            existing_column = &self.column,
+            existing_column = self.column,
             existing_column_real = column.real_name,
             temp_column = self.temporary_column_name(ctx),
             up = up,
