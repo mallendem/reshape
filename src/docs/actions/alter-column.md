@@ -121,6 +121,7 @@ down = "price / 100"
 ## Notes
 
 - If only renaming (no type/nullable/default changes), the column is renamed directly without a temporary column
+- `up` and `down` reference the altered column by its existing name from `column`, even when `changes.name` renames it
 - The `up` expression can reference any column in the table
 - The `down` expression enables backward compatibility during rollout
 - Indices on the column are automatically duplicated to the new column

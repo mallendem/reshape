@@ -709,6 +709,152 @@ fn alter_column_with_unique_index() {
 }
 
 #[test]
+fn alter_column_rename_and_change_type() {
+    let mut test = Test::new("Rename column and change type");
+
+    test.first_migration(
+        r#"
+        name = "create_accounts_table"
+
+        [[actions]]
+        type = "create_table"
+        name = "accounts"
+        primary_key = ["id"]
+
+            [[actions.columns]]
+            name = "id"
+            type = "BIGINT"
+
+            [[actions.columns]]
+            name = "balance_cents"
+            type = "BIGINT"
+            nullable = false
+        "#,
+    );
+
+    test.second_migration(
+        r#"
+        name = "balance_amount"
+
+        [[actions]]
+        type = "alter_column"
+        table = "accounts"
+        column = "balance_cents"
+        up = "balance_cents::numeric / 100"
+        down = "CASE WHEN balance_cents = round(balance_cents, 2) THEN (balance_cents * 100)::bigint ELSE NULL::bigint END"
+
+            [actions.changes]
+            name = "balance_amount"
+            type = "NUMERIC(20,2)"
+        "#,
+    );
+
+    test.after_first(|db| {
+        db.simple_query(
+            "
+            INSERT INTO accounts (id, balance_cents) VALUES
+                (1, 1000),
+                (2, 250);
+            ",
+        )
+        .unwrap();
+    });
+
+    test.intermediate(|old_db, new_db| {
+        // The new schema should expose the renamed column with the new type
+        let expected = vec!["10.00", "2.50"];
+        assert!(
+            new_db
+                .query(
+                    "SELECT balance_amount::TEXT FROM accounts ORDER BY id",
+                    &[],
+                )
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, String>("balance_amount"))
+                .eq(expected),
+            "expected new schema to expose balance_amount"
+        );
+
+        // The old schema should still expose the old column with the old type
+        let expected = vec![1000i64, 250];
+        assert!(old_db
+            .query("SELECT balance_cents FROM accounts ORDER BY id", &[])
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<_, i64>("balance_cents"))
+            .eq(expected));
+
+        // The old column name shouldn't be available in the new schema
+        assert!(
+            new_db
+                .query("SELECT balance_cents FROM accounts", &[])
+                .is_err(),
+            "expected balance_cents to not exist in new schema"
+        );
+
+        // Insert using the old schema and check the new schema gets the right value
+        old_db
+            .simple_query("INSERT INTO accounts (id, balance_cents) VALUES (3, 1999)")
+            .unwrap();
+        let result = new_db
+            .query_one(
+                "SELECT balance_amount::TEXT FROM accounts WHERE id = 3",
+                &[],
+            )
+            .unwrap();
+        assert_eq!("19.99", result.get::<_, &str>("balance_amount"));
+
+        // Insert using the new schema and check the old schema gets the right value
+        new_db
+            .simple_query("INSERT INTO accounts (id, balance_amount) VALUES (4, 5.25)")
+            .unwrap();
+        let result = old_db
+            .query_one("SELECT balance_cents FROM accounts WHERE id = 4", &[])
+            .unwrap();
+        assert_eq!(525i64, result.get::<_, i64>("balance_cents"));
+    });
+
+    test.after_completion(|db| {
+        let (name, data_type): (String, String) = db
+            .query_one(
+                "
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                AND table_name = 'accounts'
+                AND column_name != 'id'
+                ",
+                &[],
+            )
+            .map(|row| (row.get("column_name"), row.get("data_type")))
+            .unwrap();
+        assert_eq!("balance_amount", name);
+        assert_eq!("numeric", data_type);
+    });
+
+    test.after_abort(|db| {
+        let (name, data_type): (String, String) = db
+            .query_one(
+                "
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                AND table_name = 'accounts'
+                AND column_name != 'id'
+                ",
+                &[],
+            )
+            .map(|row| (row.get("column_name"), row.get("data_type")))
+            .unwrap();
+        assert_eq!("balance_cents", name);
+        assert_eq!("bigint", data_type);
+    });
+
+    test.run();
+}
+
+#[test]
 fn alter_column_with_hash_index() {
     let mut test = Test::new("Alter column with custom index type");
 

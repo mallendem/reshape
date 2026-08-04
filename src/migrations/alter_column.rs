@@ -381,6 +381,13 @@ impl Action for AlterColumn {
         schema.change_table(&self.table, |table_changes| {
             table_changes.change_column(&self.column, |column_changes| {
                 column_changes.set_column(&self.temporary_column_name(ctx));
+
+                // The new schema should expose the column under its new name, if renamed.
+                // Note that `up` and `down` still reference the column by its old name as
+                // they operate on the actual columns, not the schema representation.
+                if let Some(new_name) = &self.changes.name {
+                    column_changes.set_name(new_name);
+                }
             });
         });
     }
